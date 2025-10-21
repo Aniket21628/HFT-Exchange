@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,6 +37,64 @@ func (a *balanceStoreAdapter) GetBalance(userID, asset string) (available, locke
 
 func (a *balanceStoreAdapter) UpdateBalance(userID, asset string, available, locked float64) error {
 	return a.repo.UpdateBalance(userID, asset, available, locked)
+}
+
+// corsMiddleware adds CORS headers to responses
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			
+			// Check if origin is allowed
+			allowed := false
+			for _, allowedOrigin := range allowedOrigins {
+				if origin == allowedOrigin || allowedOrigin == "*" {
+					allowed = true
+					break
+				}
+			}
+			
+			if allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+			
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "3600")
+			
+			// Handle preflight requests
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// getAllowedOrigins returns a list of allowed CORS origins
+func getAllowedOrigins() []string {
+	origins := []string{
+		"http://localhost:3000",
+		"http://localhost:5173",
+		"http://localhost:8080",
+	}
+	
+	// Add frontend URL from environment variable if set
+	if frontendURL := os.Getenv("FRONTEND_URL"); frontendURL != "" {
+		// Handle multiple URLs separated by comma
+		urls := strings.Split(frontendURL, ",")
+		for _, url := range urls {
+			trimmed := strings.TrimSpace(url)
+			if trimmed != "" {
+				origins = append(origins, trimmed)
+			}
+		}
+	}
+	
+	return origins
 }
 
 func main() {
@@ -132,11 +191,15 @@ func main() {
 	handler := api.NewHandler(exchange, orderRepo, tradeRepo, balanceRepo, tickerRepo)
 	router := api.NewRouter(handler, hub)
 
+	// Get allowed origins and apply CORS middleware
+	allowedOrigins := getAllowedOrigins()
+	corsRouter := corsMiddleware(allowedOrigins)(router)
+
 	// HTTP server
 	port := getEnv("PORT", "8080")
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      router,
+		Handler:      corsRouter,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -144,6 +207,7 @@ func main() {
 
 	// Start server
 	go func() {
+		log.Printf("Server starting on port %s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
