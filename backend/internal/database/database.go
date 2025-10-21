@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/lib/pq" // PostgreSQL driver
+	_ "modernc.org/sqlite" // SQLite driver (keep for local dev)
 )
 
 type DB struct {
@@ -16,113 +17,235 @@ type DB struct {
 }
 
 func NewDB(connStr string) (*DB, error) {
-	// Remove sqlite:// prefix if present
-	dbPath := strings.TrimPrefix(connStr, "sqlite://")
-	
-	db, err := sql.Open("sqlite", dbPath)
+	var driver string
+	var dsn string
+
+	// Detect database type from connection string
+	if strings.HasPrefix(connStr, "sqlite://") {
+		driver = "sqlite"
+		dsn = strings.TrimPrefix(connStr, "sqlite://")
+	} else if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
+		driver = "postgres"
+		dsn = connStr
+		
+		// For NeonDB, append pooler connection if not already specified
+		// NeonDB pooled connection uses port 5432 (default) or pooler endpoint
+		if !strings.Contains(dsn, "?") {
+			dsn += "?sslmode=require"
+		} else if !strings.Contains(dsn, "sslmode") {
+			dsn += "&sslmode=require"
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported database URL format")
+	}
+
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// SQLite works best with 1 connection
-	db.SetMaxOpenConns(1)
-	log.Printf("SQLite connection established: %s", dbPath)
+	// Configure connection pool
+	if driver == "postgres" {
+		// NeonDB optimized settings for free tier
+		db.SetMaxOpenConns(10)           // Max 10 concurrent connections (safe for free tier)
+		db.SetMaxIdleConns(3)            // Keep 3 idle connections ready
+		db.SetConnMaxLifetime(5 * time.Minute)  // Recycle connections every 5 min
+		db.SetConnMaxIdleTime(2 * time.Minute)  // Close idle connections after 2 min
+		
+		log.Printf("PostgreSQL connection pool configured: MaxOpen=10, MaxIdle=3")
+	} else {
+		db.SetMaxOpenConns(1) // SQLite works best with 1 connection
+	}
 
-	return &DB{db, "sqlite"}, nil
+	log.Printf("Database connection established: %s", driver)
+	return &DB{db, driver}, nil
 }
 
 func (db *DB) InitSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		username TEXT UNIQUE NOT NULL,
-		email TEXT UNIQUE NOT NULL,
-		created_at TEXT NOT NULL DEFAULT (datetime('now'))
-	);
+	var schema string
 
-	CREATE TABLE IF NOT EXISTS orders (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		symbol TEXT NOT NULL,
-		side TEXT NOT NULL,
-		type TEXT NOT NULL,
-		quantity REAL NOT NULL,
-		price REAL NOT NULL,
-		stop_price REAL,
-		filled_quantity REAL NOT NULL DEFAULT 0,
-		remaining_qty REAL NOT NULL,
-		status TEXT NOT NULL,
-		time_in_force TEXT DEFAULT 'GTC',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		FOREIGN KEY (user_id) REFERENCES users(id)
-	);
+	if db.driver == "postgres" {
+		schema = `
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			username TEXT UNIQUE NOT NULL,
+			email TEXT UNIQUE NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW()
+		);
 
-	CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
-	CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
-	CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-	CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+		CREATE TABLE IF NOT EXISTS orders (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			symbol TEXT NOT NULL,
+			side TEXT NOT NULL,
+			type TEXT NOT NULL,
+			quantity DOUBLE PRECISION NOT NULL,
+			price DOUBLE PRECISION NOT NULL,
+			stop_price DOUBLE PRECISION,
+			filled_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+			remaining_qty DOUBLE PRECISION NOT NULL,
+			status TEXT NOT NULL,
+			time_in_force TEXT DEFAULT 'GTC',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
 
-	CREATE TABLE IF NOT EXISTS trades (
-		id TEXT PRIMARY KEY,
-		symbol TEXT NOT NULL,
-		buy_order_id TEXT NOT NULL,
-		sell_order_id TEXT NOT NULL,
-		buyer_id TEXT NOT NULL,
-		seller_id TEXT NOT NULL,
-		price REAL NOT NULL,
-		quantity REAL NOT NULL,
-		maker_order_id TEXT NOT NULL,
-		taker_order_id TEXT NOT NULL,
-		executed_at TEXT NOT NULL,
-		FOREIGN KEY (buy_order_id) REFERENCES orders(id),
-		FOREIGN KEY (sell_order_id) REFERENCES orders(id),
-		FOREIGN KEY (buyer_id) REFERENCES users(id),
-		FOREIGN KEY (seller_id) REFERENCES users(id)
-	);
+		CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+		CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
+		CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+		CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
 
-	CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
-	CREATE INDEX IF NOT EXISTS idx_trades_buyer_id ON trades(buyer_id);
-	CREATE INDEX IF NOT EXISTS idx_trades_seller_id ON trades(seller_id);
-	CREATE INDEX IF NOT EXISTS idx_trades_executed_at ON trades(executed_at DESC);
+		CREATE TABLE IF NOT EXISTS trades (
+			id TEXT PRIMARY KEY,
+			symbol TEXT NOT NULL,
+			buy_order_id TEXT NOT NULL,
+			sell_order_id TEXT NOT NULL,
+			buyer_id TEXT NOT NULL,
+			seller_id TEXT NOT NULL,
+			price DOUBLE PRECISION NOT NULL,
+			quantity DOUBLE PRECISION NOT NULL,
+			maker_order_id TEXT NOT NULL,
+			taker_order_id TEXT NOT NULL,
+			executed_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (buy_order_id) REFERENCES orders(id),
+			FOREIGN KEY (sell_order_id) REFERENCES orders(id),
+			FOREIGN KEY (buyer_id) REFERENCES users(id),
+			FOREIGN KEY (seller_id) REFERENCES users(id)
+		);
 
-	CREATE TABLE IF NOT EXISTS balances (
-		user_id TEXT NOT NULL,
-		asset TEXT NOT NULL,
-		available REAL NOT NULL DEFAULT 0,
-		locked REAL NOT NULL DEFAULT 0,
-		updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-		PRIMARY KEY (user_id, asset),
-		FOREIGN KEY (user_id) REFERENCES users(id)
-	);
+		CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+		CREATE INDEX IF NOT EXISTS idx_trades_buyer_id ON trades(buyer_id);
+		CREATE INDEX IF NOT EXISTS idx_trades_seller_id ON trades(seller_id);
+		CREATE INDEX IF NOT EXISTS idx_trades_executed_at ON trades(executed_at DESC);
 
-	CREATE INDEX IF NOT EXISTS idx_balances_user_id ON balances(user_id);
+		CREATE TABLE IF NOT EXISTS balances (
+			user_id TEXT NOT NULL,
+			asset TEXT NOT NULL,
+			available DOUBLE PRECISION NOT NULL DEFAULT 0,
+			locked DOUBLE PRECISION NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (user_id, asset),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
 
-	CREATE TABLE IF NOT EXISTS positions (
-		user_id TEXT NOT NULL,
-		symbol TEXT NOT NULL,
-		quantity REAL NOT NULL DEFAULT 0,
-		avg_entry_price REAL NOT NULL DEFAULT 0,
-		realized_pnl REAL NOT NULL DEFAULT 0,
-		updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-		PRIMARY KEY (user_id, symbol),
-		FOREIGN KEY (user_id) REFERENCES users(id)
-	);
+		CREATE INDEX IF NOT EXISTS idx_balances_user_id ON balances(user_id);
 
-	CREATE TABLE IF NOT EXISTS tickers (
-		symbol TEXT PRIMARY KEY,
-		price REAL NOT NULL,
-		high_24h REAL NOT NULL DEFAULT 0,
-		low_24h REAL NOT NULL DEFAULT 0,
-		volume_24h REAL NOT NULL DEFAULT 0,
-		change_24h REAL NOT NULL DEFAULT 0,
-		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-	);
-	`
+		CREATE TABLE IF NOT EXISTS positions (
+			user_id TEXT NOT NULL,
+			symbol TEXT NOT NULL,
+			quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+			avg_entry_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+			realized_pnl DOUBLE PRECISION NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (user_id, symbol),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
+
+		CREATE TABLE IF NOT EXISTS tickers (
+			symbol TEXT PRIMARY KEY,
+			price DOUBLE PRECISION NOT NULL,
+			high_24h DOUBLE PRECISION NOT NULL DEFAULT 0,
+			low_24h DOUBLE PRECISION NOT NULL DEFAULT 0,
+			volume_24h DOUBLE PRECISION NOT NULL DEFAULT 0,
+			change_24h DOUBLE PRECISION NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+		);
+		`
+	} else {
+		// SQLite schema (original)
+		schema = `
+		CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			username TEXT UNIQUE NOT NULL,
+			email TEXT UNIQUE NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+
+		CREATE TABLE IF NOT EXISTS orders (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			symbol TEXT NOT NULL,
+			side TEXT NOT NULL,
+			type TEXT NOT NULL,
+			quantity REAL NOT NULL,
+			price REAL NOT NULL,
+			stop_price REAL,
+			filled_quantity REAL NOT NULL DEFAULT 0,
+			remaining_qty REAL NOT NULL,
+			status TEXT NOT NULL,
+			time_in_force TEXT DEFAULT 'GTC',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+		CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
+		CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+		CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+
+		CREATE TABLE IF NOT EXISTS trades (
+			id TEXT PRIMARY KEY,
+			symbol TEXT NOT NULL,
+			buy_order_id TEXT NOT NULL,
+			sell_order_id TEXT NOT NULL,
+			buyer_id TEXT NOT NULL,
+			seller_id TEXT NOT NULL,
+			price REAL NOT NULL,
+			quantity REAL NOT NULL,
+			maker_order_id TEXT NOT NULL,
+			taker_order_id TEXT NOT NULL,
+			executed_at TEXT NOT NULL,
+			FOREIGN KEY (buy_order_id) REFERENCES orders(id),
+			FOREIGN KEY (sell_order_id) REFERENCES orders(id),
+			FOREIGN KEY (buyer_id) REFERENCES users(id),
+			FOREIGN KEY (seller_id) REFERENCES users(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+		CREATE INDEX IF NOT EXISTS idx_trades_buyer_id ON trades(buyer_id);
+		CREATE INDEX IF NOT EXISTS idx_trades_seller_id ON trades(seller_id);
+		CREATE INDEX IF NOT EXISTS idx_trades_executed_at ON trades(executed_at DESC);
+
+		CREATE TABLE IF NOT EXISTS balances (
+			user_id TEXT NOT NULL,
+			asset TEXT NOT NULL,
+			available REAL NOT NULL DEFAULT 0,
+			locked REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (user_id, asset),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_balances_user_id ON balances(user_id);
+
+		CREATE TABLE IF NOT EXISTS positions (
+			user_id TEXT NOT NULL,
+			symbol TEXT NOT NULL,
+			quantity REAL NOT NULL DEFAULT 0,
+			avg_entry_price REAL NOT NULL DEFAULT 0,
+			realized_pnl REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (user_id, symbol),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
+
+		CREATE TABLE IF NOT EXISTS tickers (
+			symbol TEXT PRIMARY KEY,
+			price REAL NOT NULL,
+			high_24h REAL NOT NULL DEFAULT 0,
+			low_24h REAL NOT NULL DEFAULT 0,
+			volume_24h REAL NOT NULL DEFAULT 0,
+			change_24h REAL NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		`
+	}
 
 	_, err := db.Exec(schema)
 	if err != nil {
@@ -146,11 +269,22 @@ func (db *DB) SeedData() error {
 	}
 
 	for _, user := range demoUsers {
-		_, err := db.Exec(`
-			INSERT INTO users (id, username, email, created_at)
-			VALUES (?, ?, ?, datetime('now'))
-			ON CONFLICT (id) DO NOTHING
-		`, user.id, user.username, user.email)
+		var query string
+		if db.driver == "postgres" {
+			query = `
+				INSERT INTO users (id, username, email, created_at)
+				VALUES ($1, $2, $3, NOW())
+				ON CONFLICT (id) DO NOTHING
+			`
+		} else {
+			query = `
+				INSERT INTO users (id, username, email, created_at)
+				VALUES ($1, $2, $3, datetime('now'))
+				ON CONFLICT (id) DO NOTHING
+			`
+		}
+
+		_, err := db.Exec(query, user.id, user.username, user.email)
 		if err != nil {
 			return fmt.Errorf("failed to seed user %s: %w", user.username, err)
 		}
@@ -168,11 +302,22 @@ func (db *DB) SeedData() error {
 		}
 
 		for _, asset := range assets {
-			_, err := db.Exec(`
-				INSERT INTO balances (user_id, asset, available, locked, updated_at)
-				VALUES (?, ?, ?, 0, datetime('now'))
-				ON CONFLICT (user_id, asset) DO NOTHING
-			`, user.id, asset.asset, asset.amount)
+			var balanceQuery string
+			if db.driver == "postgres" {
+				balanceQuery = `
+					INSERT INTO balances (user_id, asset, available, locked, updated_at)
+					VALUES ($1, $2, $3, 0, NOW())
+					ON CONFLICT (user_id, asset) DO NOTHING
+				`
+			} else {
+				balanceQuery = `
+					INSERT INTO balances (user_id, asset, available, locked, updated_at)
+					VALUES ($1, $2, $3, 0, datetime('now'))
+					ON CONFLICT (user_id, asset) DO NOTHING
+				`
+			}
+
+			_, err := db.Exec(balanceQuery, user.id, asset.asset, asset.amount)
 			if err != nil {
 				return fmt.Errorf("failed to seed balance for %s: %w", user.username, err)
 			}
@@ -191,11 +336,22 @@ func (db *DB) SeedData() error {
 	}
 
 	for _, ticker := range tickers {
-		_, err := db.Exec(`
-			INSERT INTO tickers (symbol, price, high_24h, low_24h, volume_24h, change_24h, updated_at)
-			VALUES (?, ?, ?, ?, 0, 0, datetime('now'))
-			ON CONFLICT (symbol) DO UPDATE SET price = ?, updated_at = datetime('now')
-		`, ticker.symbol, ticker.price, ticker.price, ticker.price, ticker.price)
+		var query string
+		if db.driver == "postgres" {
+			query = `
+				INSERT INTO tickers (symbol, price, high_24h, low_24h, volume_24h, change_24h, updated_at)
+				VALUES ($1, $2, $2, $2, 0, 0, NOW())
+				ON CONFLICT (symbol) DO UPDATE SET price = $2, updated_at = NOW()
+			`
+		} else {
+			query = `
+				INSERT INTO tickers (symbol, price, high_24h, low_24h, volume_24h, change_24h, updated_at)
+				VALUES ($1, $2, $2, $2, 0, 0, datetime('now'))
+				ON CONFLICT (symbol) DO UPDATE SET price = $2, updated_at = datetime('now')
+			`
+		}
+
+		_, err := db.Exec(query, ticker.symbol, ticker.price)
 		if err != nil {
 			return fmt.Errorf("failed to seed ticker %s: %w", ticker.symbol, err)
 		}
@@ -205,7 +361,10 @@ func (db *DB) SeedData() error {
 	return nil
 }
 
-// Helper to convert time.Time to SQLite format
+// TimeToString converts time.Time to database format
 func (db *DB) TimeToString(t time.Time) string {
+	if db.driver == "postgres" {
+		return t.Format(time.RFC3339)
+	}
 	return t.Format("2006-01-02 15:04:05")
 }
