@@ -126,22 +126,14 @@ Open `http://localhost:5173` in your browser and start trading!
 
 ### Backend Environment Variables
 
-The backend uses SQLite by default (zero configuration). Optional Redis for caching.
+The backend uses PostgreSQL. Get your own PostgreSQL from NeonDB or use Docker to set it up. Optional Redis for caching.
 
 **`.env` (auto-created from `.env.sqlite`)**
 ```bash
-DATABASE_URL=sqlite://./hft_exchange.db
+DATABASE_URL=<your_postgres_db>
 REDIS_URL=redis://localhost:6379/0
 PORT=8080
 ENVIRONMENT=development
-```
-
-**To reset the database:**
-```bash
-cd backend
-del hft_exchange.db  # Windows
-rm hft_exchange.db   # Linux/Mac
-go run cmd/server/main.go
 ```
 
 ### Frontend Environment Variables
@@ -157,7 +149,7 @@ VITE_API_URL=http://localhost:8080
 - **Language:** Go 1.21+
 - **HTTP Router:** Gorilla Mux
 - **WebSocket:** Gorilla WebSocket
-- **Database:** SQLite (dev) / PostgreSQL (production-ready)
+- **Database:** PostgreSQL
 - **Cache:** Redis 7+ (optional)
 - **Concurrency:** Goroutines + Channels
 
@@ -187,7 +179,7 @@ hft-exchange/
 │   │   ├── pricefeed/     # Price simulator
 │   │   └── bot/           # Market maker
 │   └── go.mod
-│
+│   └── go.sum
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/         # Dashboard, TradingPage
@@ -197,20 +189,8 @@ hft-exchange/
 │   │   └── types/         # TypeScript types
 │   └── package.json
 │
-├── docker-compose.yml     # Redis + Postgres
-└── TEST_CASES.md          # Order type testing guide
+└── docker-compose.yml     # Redis + Postgres
 ```
-
-## 🧪 Testing
-
-See [TEST_CASES.md](./TEST_CASES.md) for comprehensive testing guide covering:
-- Market Orders
-- Limit Orders  
-- Stop-Limit Orders
-- Balance updates
-- Order book behavior
-
-## 🎯 How It Works
 
 ### Order Lifecycle
 
@@ -229,19 +209,6 @@ See [TEST_CASES.md](./TEST_CASES.md) for comprehensive testing guide covering:
 7. Frontend updates UI
 ```
 
-### Concurrency Model
-
-```go
-// Each runs in parallel goroutine:
-go hub.Run()                    // WebSocket broadcasting
-go priceSimulator.Start()       // Price updates every 3s
-go marketMaker.Start()          // Bot places orders
-go exchange.processAllTrades()  // Trade settlement
-go exchange.processAllOrderUpdates()
-
-// Result: Utilizes all CPU cores, handles 1000+ concurrent users
-```
-
 ## 🔥 Performance
 
 - **Order Processing:** 30,000+ orders/sec (across all symbols)
@@ -250,61 +217,12 @@ go exchange.processAllOrderUpdates()
 - **Memory:** ~2KB per active order
 - **CPU:** Multi-core utilization via goroutines
 
-## 📝 API Endpoints
-
-### REST API
-
-```
-POST   /api/v1/orders              # Place order
-DELETE /api/v1/orders/:id          # Cancel order
-GET    /api/v1/orders/:symbol      # Get all orders for symbol
-GET    /api/v1/users/:id/orders    # Get user's orders
-GET    /api/v1/trades/:symbol      # Get recent trades
-GET    /api/v1/users/:id/trades    # Get user's trades
-GET    /api/v1/orderbook/:symbol   # Get order book
-GET    /api/v1/tickers             # Get all tickers
-GET    /api/v1/tickers/:symbol     # Get specific ticker
-GET    /api/v1/users/:id/balances  # Get user balances
-GET    /health                     # Health check
-```
-
-### WebSocket
-
-```
-ws://localhost:8080/ws
-
-Messages:
-- orderbook   → { symbol, bids[], asks[] }
-- trade       → { id, symbol, price, quantity }
-- ticker      → { symbol, price, change_24h }
-- order_update → { id, status, filled_quantity }
-```
-
 ## 🐳 Docker Support
 
 ```bash
-# Start both PostgreSQL and Redis
+# Start Redis
 docker-compose up -d
-
-# Backend will auto-connect to both
-# (Falls back gracefully if unavailable)
 ```
-
-## 🚧 Future Enhancements
-
-- [ ] User authentication (JWT)
-- [ ] Order history & trade analytics
-- [ ] Advanced charting (candlesticks)
-- [ ] Stop-loss / Take-profit automation
-- [ ] Fee calculation & rebates
-- [ ] Margin trading
-- [ ] WebSocket authentication
-- [ ] Rate limiting
-- [ ] Admin dashboard
-
-## 📄 License
-
-MIT
 
 ## 🤝 Contributing
 
