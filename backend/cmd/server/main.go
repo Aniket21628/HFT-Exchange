@@ -144,9 +144,6 @@ func main() {
 
 	// Start server
 	go func() {
-		log.Printf("🚀 HFT Exchange server starting on port %s", port)
-		log.Printf("📊 WebSocket endpoint: ws://localhost:%s/ws", port)
-		log.Printf("🔌 REST API: http://localhost:%s/api/v1", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
