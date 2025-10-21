@@ -1,0 +1,26 @@
+# Environment
+.env
+.env.local
+
+# Compiled binaries
+*.exe
+*.test
+*.out
+*.dll
+*.so
+*.dylib
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Temporary
+/tmp/
+/vendor/
+
+# Debug/fix notes
+*FIX*.md
+*FIX*.txt
+URGENT*.txt
+URGENT*.md

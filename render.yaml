@@ -1,0 +1,33 @@
+services:
+  # Backend API (Go)
+  - type: web
+    name: hft-exchange-backend
+    runtime: go
+    plan: free
+    region: oregon
+    buildCommand: cd backend && go build -o server cmd/server/main.go
+    startCommand: cd backend && ./server
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite://./hft_exchange.db
+      - key: PORT
+        value: 8080
+      - key: ENVIRONMENT
+        value: production
+    disk:
+      name: sqlite-data
+      mountPath: /opt/render/project/src/backend
+      sizeGB: 1
+
+  # Frontend (React Static Site)
+  - type: web
+    name: hft-exchange-frontend
+    runtime: static
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    publishPath: frontend/dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_API_URL
+        sync: false
