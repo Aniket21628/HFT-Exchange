@@ -108,7 +108,6 @@ func main() {
 		
 		// Get ticker and broadcast (DB is already updated by simulator)
 		if ticker, err := tickerRepo.GetTicker(symbol); err == nil {
-			log.Printf("📡 Broadcasting ticker: %s @ $%.2f (change: %.2f%%)", ticker.Symbol, ticker.Price, ticker.Change24h)
 			hub.BroadcastTicker(ticker)
 		} else {
 			log.Printf("❌ Failed to get ticker %s: %v", symbol, err)

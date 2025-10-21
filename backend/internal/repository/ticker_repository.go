@@ -31,10 +31,6 @@ func (r *TickerRepository) GetTicker(symbol string) (*domain.Ticker, error) {
 		&ticker.Volume24h, &ticker.Change24h, &updatedAt,
 	)
 	
-	if err == nil {
-		fmt.Printf("📊 Fetched ticker from DB: symbol=%s, price=%.2f\n", ticker.Symbol, ticker.Price)
-	}
-	
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ticker: %w", err)
 	}

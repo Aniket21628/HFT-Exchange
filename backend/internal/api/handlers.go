@@ -147,7 +147,6 @@ func (h *Handler) GetUserOrders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("Getting orders for user: %s (limit: %d)", userID, limit)
 	orders, err := h.orderRepo.GetOrdersByUser(userID, limit)
 	if err != nil {
 		log.Printf("ERROR getting orders: %v", err)
@@ -155,7 +154,6 @@ func (h *Handler) GetUserOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Found %d orders for user %s", len(orders), userID)
 	respondJSON(w, http.StatusOK, Response{Success: true, Data: orders})
 }
 
@@ -184,7 +182,6 @@ func (h *Handler) GetUserBalances(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
 
-	log.Printf("Getting balances for user: %s", userID)
 	balances, err := h.balanceRepo.GetAllBalances(userID)
 	if err != nil {
 		log.Printf("ERROR getting balances: %v", err)
@@ -192,7 +189,6 @@ func (h *Handler) GetUserBalances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Found %d balances for user %s", len(balances), userID)
 	respondJSON(w, http.StatusOK, Response{Success: true, Data: balances})
 }
 

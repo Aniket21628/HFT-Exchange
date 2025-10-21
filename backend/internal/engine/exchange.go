@@ -76,12 +76,10 @@ func (ex *Exchange) SubmitOrder(order *domain.Order) error {
 	ex.mu.RUnlock()
 
 	if !exists {
-		log.Printf("Symbol %s not found", order.Symbol)
 		return nil
 	}
 
 	if err := ex.orderStore.SaveOrder(order); err != nil {
-		log.Printf("Failed to save order: %v", err)
 		return err
 	}
 

@@ -38,17 +38,13 @@ func (me *MatchingEngine) ProcessOrder(order *domain.Order) {
 	defer me.mu.Unlock()
 
 	if order.Type == domain.OrderTypeStopLimit {
-		log.Printf("🛑 Stop-Limit order placed: %s %s %.4f @ Stop:$%.2f Limit:$%.2f", 
-			order.Side, order.Symbol, order.Quantity, order.StopPrice, order.Price)
 		me.stopLimitOrders = append(me.stopLimitOrders, order)
 		return
 	}
 
 	if order.Type == domain.OrderTypeMarket {
-		log.Printf("⚡ Market order: %s %s %.4f", order.Side, order.Symbol, order.Quantity)
 		me.matchMarketOrder(order)
 	} else {
-		log.Printf("🎯 Limit order: %s %s %.4f @ $%.2f", order.Side, order.Symbol, order.Quantity, order.Price)
 		me.matchLimitOrder(order)
 	}
 }
