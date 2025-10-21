@@ -118,8 +118,6 @@ func (r *BalanceRepository) UpdateBalance(userID, asset string, available, locke
 	if err != nil {
 		return fmt.Errorf("failed to update balance for %s/%s (%.4f/%.4f): %w", userID, asset, available, locked, err)
 	}
-	
-	fmt.Printf("✅ Balance updated: %s %s - Available: %.4f, Locked: %.4f\n", userID, asset, available, locked)
 	return nil
 }
 

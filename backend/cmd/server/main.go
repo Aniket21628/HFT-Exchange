@@ -94,7 +94,6 @@ func main() {
 	// Set up trade broadcasting callback
 	exchange.SetOnTradeCallback(func(trade *domain.Trade) {
 		hub.BroadcastTrade(trade)
-		log.Printf("Trade executed: %s %.4f @ %.2f", trade.Symbol, trade.Quantity, trade.Price)
 	})
 
 	// Initialize price simulator

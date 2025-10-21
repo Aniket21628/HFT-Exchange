@@ -193,8 +193,6 @@ func (ex *Exchange) settleTrade(trade *domain.Trade) error {
 	baseAsset, quoteAsset := ex.parseSymbol(trade.Symbol)
 	
 	tradeValue := trade.Price * trade.Quantity
-	log.Printf("💰 Settling trade: %s bought %.4f %s @ %.2f from %s (total: %.2f %s)", 
-		trade.BuyerID, trade.Quantity, baseAsset, trade.Price, trade.SellerID, tradeValue, quoteAsset)
 	
 	// Update buyer balances: -quote asset (USD), +base asset (BTC)
 	buyerQuoteAvail, buyerQuoteLocked, err := ex.balanceStore.GetBalance(trade.BuyerID, quoteAsset)
@@ -205,10 +203,6 @@ func (ex *Exchange) settleTrade(trade *domain.Trade) error {
 	if err != nil {
 		return err
 	}
-	
-	// Buyer: reduce available quote (USD), increase available base (BTC)
-	log.Printf("  Buyer %s before: %s=%.4f(avail) %.4f(locked), %s=%.4f(avail) %.4f(locked)", 
-		trade.BuyerID, quoteAsset, buyerQuoteAvail, buyerQuoteLocked, baseAsset, buyerBaseAvail, buyerBaseLocked)
 	
 	newBuyerQuoteAvail := buyerQuoteAvail - tradeValue  // DEDUCT USD from available
 	newBuyerQuoteLocked := buyerQuoteLocked              // Keep locked as-is for now
@@ -222,9 +216,6 @@ func (ex *Exchange) settleTrade(trade *domain.Trade) error {
 		return err
 	}
 	
-	log.Printf("  Buyer %s after: %s=%.4f(avail) %.4f(locked), %s=%.4f(avail) %.4f(locked)", 
-		trade.BuyerID, quoteAsset, newBuyerQuoteAvail, newBuyerQuoteLocked, baseAsset, newBuyerBaseAvail, newBuyerBaseLocked)
-	
 	// Update seller balances: +quote asset (USD), -base asset (BTC)
 	sellerQuoteAvail, sellerQuoteLocked, err := ex.balanceStore.GetBalance(trade.SellerID, quoteAsset)
 	if err != nil {
@@ -234,10 +225,6 @@ func (ex *Exchange) settleTrade(trade *domain.Trade) error {
 	if err != nil {
 		return err
 	}
-	
-	// Seller: increase available quote (USD), reduce available base (BTC)
-	log.Printf("  Seller %s before: %s=%.4f(avail) %.4f(locked), %s=%.4f(avail) %.4f(locked)", 
-		trade.SellerID, quoteAsset, sellerQuoteAvail, sellerQuoteLocked, baseAsset, sellerBaseAvail, sellerBaseLocked)
 	
 	newSellerQuoteAvail := sellerQuoteAvail + tradeValue  // ADD USD to available
 	newSellerQuoteLocked := sellerQuoteLocked
@@ -250,9 +237,6 @@ func (ex *Exchange) settleTrade(trade *domain.Trade) error {
 	if err := ex.balanceStore.UpdateBalance(trade.SellerID, baseAsset, newSellerBaseAvail, newSellerBaseLocked); err != nil {
 		return err
 	}
-	
-	log.Printf("  Seller %s after: %s=%.4f(avail) %.4f(locked), %s=%.4f(avail) %.4f(locked)", 
-		trade.SellerID, quoteAsset, newSellerQuoteAvail, newSellerQuoteLocked, baseAsset, newSellerBaseAvail, newSellerBaseLocked)
 	
 	return nil
 }
