@@ -80,7 +80,7 @@ func getAllowedOrigins() []string {
 		"http://localhost:3000",
 		"http://localhost:5173",
 		"http://localhost:8080",
-	}
+		"https://hft-exchange.example.com"	}
 	
 	// Add frontend URL from environment variable if set
 	if frontendURL := os.Getenv("FRONTEND_URL"); frontendURL != "" {
